@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 )
 
@@ -11,6 +13,20 @@ func main() {
 		return
 	}
 
-	link := os.Args[1]
-	fmt.Println(link)
+	url := os.Args[1]
+
+	resp, err := http.Get(url)
+	if err != nil {
+		fmt.Printf("couldn't get url: %v", err)
+		return
+	}
+
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Printf("couldn't read url: %v", err)
+		return
+	}
+
+	fmt.Println(string(body))
 }
