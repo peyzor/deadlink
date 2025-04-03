@@ -11,33 +11,82 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 )
 
-var visitedLinks = make(map[string]bool)
-var URL string
+type website struct {
+	url string
 
-func main() {
-	if len(os.Args) != 2 {
-		fmt.Printf("incorrect number of given arguments expected 1 but got: %d", len(os.Args)-1)
-		return
-	}
+	mu           sync.Mutex
+	visitedLinks map[string]bool
+	wg           sync.WaitGroup
+}
 
-	URL = os.Args[1]
-	visitedLinks[URL] = true
+func (w *website) visit(url string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 
-	URL = strings.TrimSuffix(URL, "/")
-	err := crawlPage(URL)
+	w.visitedLinks[url] = true
+}
+
+func (w *website) isVisited(url string) (visited bool, ok bool) {
+	w.mu.Lock()
+	w.mu.Unlock()
+
+	visited, ok = w.visitedLinks[url]
+	return
+}
+
+func (w *website) crawlPage(url string) error {
+	body, err := requestPage(url)
 	if err != nil {
-		log.Println(err)
+		return err
 	}
 
-	links := slices.Collect(maps.Keys(visitedLinks))
-	fmt.Println(links)
+	node, err := parseHTML(body)
+	if err != nil {
+		return err
+	}
+
+	w.findLinks(node)
+	return nil
+}
+
+func (w *website) findLinks(node *html.Node) {
+	for n := range node.Descendants() {
+		if n.Type != html.ElementNode || n.Data != "a" {
+			continue
+		}
+		for _, attr := range n.Attr {
+			if attr.Key != "href" {
+				continue
+			}
+			link := attr.Val
+			if _, ok := w.isVisited(link); !ok {
+				w.visit(link)
+
+				if strings.HasPrefix(link, "http") {
+					continue
+				}
+
+				link = w.url + link
+
+				w.wg.Add(1)
+				go func() {
+					defer w.wg.Done()
+					err := w.crawlPage(link)
+					if err != nil {
+						log.Println(err)
+					}
+				}()
+			}
+		}
+	}
 }
 
 func requestPage(url string) ([]byte, error) {
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := &http.Client{Timeout: 3 * time.Second}
 	resp, err := client.Get(url)
 	if err != nil {
 		fmt.Printf("couldn't get url: %v", err)
@@ -64,44 +113,30 @@ func parseHTML(body []byte) (*html.Node, error) {
 	return doc, nil
 }
 
-func findLinks(node *html.Node) {
-	for n := range node.Descendants() {
-		if n.Type != html.ElementNode || n.Data != "a" {
-			continue
+func main() {
+	if len(os.Args) != 2 {
+		fmt.Printf("incorrect number of given arguments expected 1 but got: %d", len(os.Args)-1)
+		return
+	}
+
+	site := website{
+		url:          strings.TrimSuffix(os.Args[1], "/"),
+		visitedLinks: make(map[string]bool),
+	}
+	site.visit(site.url)
+
+	site.wg.Add(1)
+	go func() {
+		defer site.wg.Done()
+
+		err := site.crawlPage(site.url)
+		if err != nil {
+			log.Println(err)
 		}
-		for _, attr := range n.Attr {
-			if attr.Key != "href" {
-				continue
-			}
-			link := attr.Val
-			if _, ok := visitedLinks[link]; !ok {
-				visitedLinks[link] = true
+	}()
 
-				if strings.HasPrefix(link, "http") {
-					continue
-				}
+	site.wg.Wait()
 
-				link = URL + link
-				err := crawlPage(link)
-				if err != nil {
-					log.Println(err)
-				}
-			}
-		}
-	}
-}
-
-func crawlPage(url string) error {
-	body, err := requestPage(url)
-	if err != nil {
-		return err
-	}
-
-	node, err := parseHTML(body)
-	if err != nil {
-		return err
-	}
-
-	findLinks(node)
-	return nil
+	links := slices.Collect(maps.Keys(site.visitedLinks))
+	fmt.Println(links)
 }
