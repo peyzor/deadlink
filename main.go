@@ -21,6 +21,7 @@ type website struct {
 	mu           sync.Mutex
 	visitedLinks map[string]bool
 	wg           sync.WaitGroup
+	logs         chan string
 }
 
 func (w *website) visit(url string) {
@@ -71,6 +72,7 @@ func (w *website) findLinks(node *html.Node) {
 				}
 
 				link = w.url + link
+				w.logs <- link
 
 				w.wg.Add(1)
 				go func() {
@@ -122,8 +124,15 @@ func main() {
 	site := website{
 		url:          strings.TrimSuffix(os.Args[1], "/"),
 		visitedLinks: make(map[string]bool),
+		logs:         make(chan string),
 	}
 	site.visit(site.url)
+
+	go func() {
+		for l := range site.logs {
+			fmt.Println(l)
+		}
+	}()
 
 	site.wg.Add(1)
 	go func() {
@@ -136,6 +145,7 @@ func main() {
 	}()
 
 	site.wg.Wait()
+	close(site.logs)
 
 	links := slices.Collect(maps.Keys(site.visitedLinks))
 	fmt.Println(links)
