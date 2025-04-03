@@ -40,7 +40,7 @@ func (w *website) isVisited(url string) (visited bool, ok bool) {
 }
 
 func (w *website) crawlPage(url string) error {
-	body, err := requestPage(url)
+	body, err := w.requestPage(url)
 	if err != nil {
 		return err
 	}
@@ -72,7 +72,6 @@ func (w *website) findLinks(node *html.Node) {
 				}
 
 				link = w.url + link
-				w.logs <- link
 
 				w.wg.Add(1)
 				go func() {
@@ -87,7 +86,7 @@ func (w *website) findLinks(node *html.Node) {
 	}
 }
 
-func requestPage(url string) ([]byte, error) {
+func (w *website) requestPage(url string) ([]byte, error) {
 	client := &http.Client{Timeout: 3 * time.Second}
 	resp, err := client.Get(url)
 	if err != nil {
@@ -95,6 +94,8 @@ func requestPage(url string) ([]byte, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
+
+	w.logs <- fmt.Sprintf("[%s] %s", resp.Status, url)
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
