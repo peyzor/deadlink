@@ -33,7 +33,7 @@ func (w *website) visit(url string) {
 
 func (w *website) isVisited(url string) (visited bool, ok bool) {
 	w.mu.Lock()
-	w.mu.Unlock()
+	defer w.mu.Unlock()
 
 	visited, ok = w.visitedLinks[url]
 	return
